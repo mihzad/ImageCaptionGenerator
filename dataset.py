@@ -124,10 +124,12 @@ def flickr_collate_fn(batch):
 
 class Vocabulary:
     def __init__(self):
-        self.word2idx = {"<PAD>": 0, "<SOS>": 1, "<EOS>": 2}
-        self.idx2word = {0: "<PAD>", 1: "<SOS>", 2: "<EOS>"}
+        self.word2idx = {"<PAD>": 0, "<SOS>": 1, "<EOS>": 2, "<UNK>": 3}
+        self.idx2word = {0: "<PAD>", 1: "<SOS>", 2: "<EOS>", 3: "<UNK>"}
         self.word_count = {}
 
+    def __len__(self):
+        return len(self.word2idx)
     def build(self, captions, threshold=5):
         for cap in captions:
             for word in cap.lower().split():
@@ -139,14 +141,14 @@ class Vocabulary:
                 self.idx2word[idx] = word
 
     def tokenize(self, sentence):
-        tokens = [self.word2idx.get(word, 0) for word in sentence.split()]
+        tokens = [self.word2idx.get(word, self.word2idx["<UNK>"]) for word in sentence.split()]
         return [self.word2idx["<SOS>"]] + tokens + [self.word2idx["<EOS>"]]
 
     def pad(self, tokens, max_len):
         tokens = tokens[:max_len]
         return tokens + [self.word2idx["<PAD>"]] * (max_len - len(tokens))
 
-    def detokenize(self, tokenized_pred_batch):
+    def detokenize(self, tokenized_pred_batch, join=True):
         pad_idx = self.word2idx["<PAD>"]
         eos_idx = self.word2idx["<EOS>"]
         sos_idx = self.word2idx["<SOS>"]
@@ -155,16 +157,19 @@ class Vocabulary:
         for pred in tokenized_pred_batch:
             # Cut off at EOS
             if eos_idx in pred:
-                pred = pred[:torch.where(pred == eos_idx)[0][0]]
+                first_eos_occur = torch.where(pred == eos_idx)[0][0]
+                pred = pred[:first_eos_occur]
 
             # Detokenize
             pred_words_list = [
                 self.idx2word[idx.item()]
                 for idx in pred
-                if idx.item() not in [pad_idx, eos_idx, sos_idx]
+                #if idx.item() not in [pad_idx, eos_idx, sos_idx]
             ]
 
-            if len(pred_words_list) > 0:
+            if join:
                 pred_sentences_detokenized.append(" ".join(pred_words_list))
+            else:
+                pred_sentences_detokenized = pred_words_list
 
         return pred_sentences_detokenized

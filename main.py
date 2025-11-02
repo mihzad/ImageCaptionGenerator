@@ -4,16 +4,18 @@ import torch
 import torch.nn as nn
 
 from torchvision.transforms import v2
-from torch.utils.data import DataLoader, Subset, WeightedRandomSampler
-from torch.optim.lr_scheduler import LambdaLR, CosineAnnealingLR
+from torch.utils.data import DataLoader
+from torch.optim.lr_scheduler import LambdaLR
 from torch.optim import AdamW
-from pytorchvideo.models.hub import x3d_s, x3d_m
 
 from torchmetrics.text.bleu import BLEUScore
+from torchmetrics.text.bert import BERTScore
 
 from encoder import EncoderCNN
 from decoder import DecoderRNN
 from dataset import Flickr8kDatasetComposer, flickr_collate_fn
+
+from tester import perform_testing
 
 from PIL import Image
 import numpy as np
@@ -27,9 +29,9 @@ img_size = 224
 rand_state = 44
 embed_size = 256
 hidden_size = 512
-num_layers = 1
-max_len = 30
-num_workers = 4
+num_layers = 3
+max_len = 40
+num_workers = 6
 device = torch.device("cuda")#torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def curr_time():
@@ -92,8 +94,10 @@ def perform_training(encoder, decoder, vocab,
 
     printshare("training preparation...")
 
-    train_loader = DataLoader(training_set, collate_fn=flickr_collate_fn, batch_size=sub_batch_size, num_workers=num_workers)
-    val_loader = DataLoader(validation_set, collate_fn=flickr_collate_fn, batch_size=sub_batch_size, num_workers=num_workers)
+    train_loader = DataLoader(training_set, collate_fn=flickr_collate_fn, batch_size=sub_batch_size,
+                              shuffle=True, num_workers=num_workers)
+    val_loader = DataLoader(validation_set, collate_fn=flickr_collate_fn, batch_size=sub_batch_size,
+                            shuffle=True, num_workers=num_workers)
 
     criterion = nn.CrossEntropyLoss(ignore_index=vocab.word2idx["<PAD>"])
 
@@ -160,6 +164,7 @@ def perform_training(encoder, decoder, vocab,
     #========== training itself ==========
     while curr_epoch < epochs:
         printshare(f"[{curr_time().strftime('%Y-%m-%d %H:%M:%S')}] epoch {curr_epoch + 1}/{epochs} processing...")
+
         train_loss, train_bleu = perform_training_epoch(
             encoder=encoder, decoder=decoder, vocab=vocab,
             full_batch_size=batch_size, sub_batch_size=sub_batch_size,
@@ -193,8 +198,6 @@ def perform_training(encoder, decoder, vocab,
 
         torch.save({ # stats
             'epoch': curr_epoch,
-            #'train_captions_tokenized': train_targets,
-            #'train_predicted_tokens': train_predictions,
             'train_loss': train_loss,
             'val_loss': val_loss,
         },
@@ -221,10 +224,11 @@ def perform_training_epoch(encoder, decoder, vocab, full_batch_size, sub_batch_s
     for i, (images, captions, ref_list) in enumerate(train_loader):
         images, captions = images.to(device), captions.to(device)
         features = encoder(images)
-        outputs = decoder(features, captions)
-
-        outputs = outputs[:, :-1, :]  # remove last time step=EOS
-        loss = criterion(outputs.reshape(-1, vocab_size),
+        outputs = decoder(features, captions[:, :-1])
+        #captions are padded, so :-1 does not remove EOS.
+        # BUT: criterion.ignore_index = 0 (thats ignore pads) does the job.
+        #outputs = outputs[:, :-1, :]  # remove last time step=EOS
+        loss = criterion(outputs.reshape(-1, len(vocab)),
                          captions[:, 1:].reshape(-1))
 
         loss = loss / accum_steps # smoothing the magnitude for accumulating
@@ -253,23 +257,36 @@ def perform_validation_epoch(encoder, decoder, vocab, val_loader, criterion):
     bleu_metric = BLEUScore(n_gram=4).to(device)
     with torch.no_grad():
         batch_losses = []
+
         for images, captions, ref_list in val_loader:
             images, captions = images.to(device), captions.to(device)
 
             features = encoder(images)
-            outputs = decoder(features, captions)
 
-            outputs = outputs[:, :-1, :]  # remove last time step
-            batch_losses.append(criterion(outputs.reshape(-1, vocab_size),
+            hidden = None
+
+            input_tokens_batch = torch.full(size=(val_loader.batch_size,),
+                                            fill_value=vocab.word2idx["<SOS>"]).unsqueeze(1).to(device) #<sos> input
+            generated_outputs = []
+
+            for step in range(1, max_len):
+                # On first step, include image features
+                output, hidden = decoder.forward_inference_step(input_tokens_batch, hidden,
+                                                                features_emb=features if step == 1 else None)
+                # Choose the most probable next token (greedy decoding)
+                predicted_batch = output.argmax(-1)
+                # Feed predicted batch into next step
+                input_tokens_batch = predicted_batch
+                generated_outputs.append(output)
+
+            batch_output = torch.stack(generated_outputs, dim=1)
+            batch_losses.append(criterion(batch_output.reshape(-1, len(vocab)),
                                           captions[:, 1:].reshape(-1))
                                 .item())
 
-
-            preds = outputs.argmax(dim=-1)
-            pred_sentences = vocab.detokenize(preds)
-
-            if len(pred_sentences) > 0:
-                bleu_metric.update(pred_sentences, ref_list)
+            generated_captions = vocab.detokenize(batch_output.argmax(-1))
+            if len(generated_captions) > 0:
+                bleu_metric.update(generated_captions, ref_list)
 
         epoch_loss = sum(batch_losses) / len(batch_losses)
         bleu_avg = bleu_metric.compute().item()
@@ -316,21 +333,20 @@ if __name__ == '__main__':
     test_set = dataset.get_subset("test", transform=nontrain_transform)
     vocabulary = dataset.vocab
 
-    vocab_size = len(vocabulary.word2idx)
-    print(f"Vocab size: {vocab_size}")
+    print(f"Vocab size: {len(vocabulary)}")
     print(f"Train captions: {len(train_set)}, Val: {len(val_set)}, Test: {len(test_set)}")
 
     encoder = EncoderCNN(embed_size).to(device)
-    decoder = DecoderRNN(embed_size, hidden_size, vocab_size, num_layers).to(device)
+    decoder = DecoderRNN(embed_size, hidden_size, len(vocabulary), num_layers, dropout=0.3).to(device)
 
 
 
-    perform_training(encoder=encoder,decoder=decoder, vocab=vocabulary,
-                     training_set=train_set, validation_set=val_set,
-                     epochs=600, w_decay=1e-4, batch_size=64, sub_batch_size=64,
-                     lr=1e-3, lr_lambda=cosannealing_decay_warmup(
-                       warmup_steps=5, T_0=10, T_mult=1.1, decay_factor=0.9, base_lr=1e-3, eta_min=1e-8),
-                     pretrained=False)
+    #perform_training(encoder=encoder,decoder=decoder, vocab=vocabulary,
+    #                 training_set=train_set, validation_set=val_set,
+    #                 epochs=600, w_decay=1e-4, batch_size=64, sub_batch_size=64,
+    #                 lr=1e-3, lr_lambda=cosannealing_decay_warmup(
+    #                   warmup_steps=5, T_0=10, T_mult=1.2, decay_factor=0.9, base_lr=1e-3, eta_min=1e-8),
+    #                 pretrained=False)
 
-    #perform_testing(net=net, batch_size=8, testing_set=train_set,
-    #                weights_file='checkpoints/ep_161_p_94.3_r_93.5_a_93.9_model.pth')
+    perform_testing(encoder=encoder, decoder=decoder, vocab=vocabulary, batch_size=64, testing_set=test_set,
+                    weights_file='checkpoints/models_e256_h512_l3/ep_39_tb_16.4_vb_15.1_model.pth')
