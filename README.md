@@ -3,6 +3,7 @@
 dataset - Flickr8k: https://github.com/jbrownlee/Datasets/releases
 
 encoder model used: MobileNetV3-Large-based, freezed features &  learnable FC (960, embedding_size)
+
 decoder model used: LSTM with 2 variants of (embedding_size, hidden_size, num_layers) combinations.
 
 ##test subset results for decoders:
