@@ -19,7 +19,17 @@ performing testing...
 
 bleu: 0.1565232127904892; bert: {'f1': 0.6901417970657349, 'precision': 0.6910170316696167, 'recall': 0.6915327310562134}
 
+### extra testing with own set of downloaded images
+see own_set folder for inputs.
 
-own images testing result (see own_set for inputs):
-<img width="1062" height="300" alt="image" src="https://github.com/user-attachments/assets/b31d393c-c21c-452d-a53b-625f73962b9c" />
+People cycling            | Dogs playing  |  People traveling
+:-------------------------:|:-------------------------:|:-------------------------:
+<img width="400" src="own_set/people_cycling.jpg" />  |  <img width="400" src="own_set/dogs_playing.jpg" /> | <img width="400" src="own_set/people_traveling.jpg" />
+
+testing result for model 1:
+<img width="1200" alt="image" src="https://github.com/user-attachments/assets/1de7d184-ff1d-4465-86a3-406a66ea34db" />
+
+testing result for model 2:
+<img width="1200" alt="image" src="https://github.com/user-attachments/assets/4c5cf805-4c61-4feb-ab1f-81bf5191b4f0" />
+
 
