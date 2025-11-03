@@ -18,3 +18,8 @@ bleu: 0.16702355444431305; bert: {'f1': 0.6866761445999146, 'precision': 0.68683
 performing testing...
 
 bleu: 0.1565232127904892; bert: {'f1': 0.6901417970657349, 'precision': 0.6910170316696167, 'recall': 0.6915327310562134}
+
+
+own images testing result (see own_set for inputs):
+<img width="1062" height="300" alt="image" src="https://github.com/user-attachments/assets/b31d393c-c21c-452d-a53b-625f73962b9c" />
+
