@@ -15,7 +15,7 @@ from encoder import EncoderCNN
 from decoder import DecoderRNN
 from dataset import Flickr8kDatasetComposer, flickr_collate_fn
 
-from tester import perform_testing
+from tester import perform_testing, perform_manual_testing
 
 from PIL import Image
 import numpy as np
@@ -28,8 +28,8 @@ from zoneinfo import ZoneInfo
 img_size = 224
 rand_state = 44
 embed_size = 256
-hidden_size = 512
-num_layers = 3
+hidden_size = 256
+num_layers = 2
 max_len = 40
 num_workers = 6
 device = torch.device("cuda")#torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -348,5 +348,8 @@ if __name__ == '__main__':
     #                   warmup_steps=5, T_0=10, T_mult=1.2, decay_factor=0.9, base_lr=1e-3, eta_min=1e-8),
     #                 pretrained=False)
 
-    perform_testing(encoder=encoder, decoder=decoder, vocab=vocabulary, batch_size=64, testing_set=test_set,
-                    weights_file='checkpoints/models_e256_h512_l3/ep_39_tb_16.4_vb_15.1_model.pth')
+    #perform_testing(encoder=encoder, decoder=decoder, vocab=vocabulary, batch_size=64, testing_set=test_set,
+    #                weights_file='checkpoints/models_e256_h512_l3/ep_39_tb_16.4_vb_15.1_model.pth')
+
+    perform_manual_testing(encoder=encoder, decoder=decoder, vocab=vocabulary, img_transform=nontrain_transform,
+                           weights_file="checkpoints/models_e256_h256_l2/ep_43_tb_16.6_vb_15.1_model.pth")

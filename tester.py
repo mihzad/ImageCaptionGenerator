@@ -3,7 +3,9 @@ from torch.utils.data import DataLoader
 from dataset import flickr_collate_fn
 import numpy as np
 import matplotlib.pyplot as plt
+import torchvision.transforms.functional as F
 
+from PIL import Image
 from torchmetrics.text.bleu import BLEUScore
 from torchmetrics.text.bert import BERTScore
 
@@ -71,3 +73,47 @@ def perform_testing(encoder, decoder, vocab, batch_size, testing_set, weights_fi
             'recall': all_recall.mean().item()
         }
         printshare(f"bleu: {bleu_avg}; bert: {bert_avg}")
+
+def perform_manual_testing(encoder, decoder, vocab, img_transform, weights_file: str):
+    own_set = []
+
+    img_names = ["dogs_playing.jpg", "people_traveling.jpg", "people_cycling.jpg"]
+    for img_name in img_names:
+        img_path = f"own_set/{img_name}"
+        img = Image.open(img_path, formats=["JPEG"]).convert("RGB")
+        img_tensor = img_transform(F.to_tensor(img))
+        img_ready = img_transform(img_tensor)
+        own_set.append(img_ready)
+
+    checkpoint = torch.load(weights_file)
+    encoder.load_state_dict(checkpoint['encoder'], strict=False)
+    decoder.load_state_dict(checkpoint['decoder'], strict=False)
+    encoder.eval()
+    decoder.eval()
+    with (torch.no_grad()):
+
+        images = torch.stack(own_set).to(device)
+
+        features = encoder(images)
+
+        hidden = None
+        input_tokens_batch = torch.full(size=(len(own_set),),
+                                        fill_value=vocab.word2idx["<SOS>"]).unsqueeze(1).to(device)  # <sos> input
+        generated_outputs = []
+
+        for step in range(1, 40):
+            # On first step, include image features
+            output, hidden = decoder.forward_inference_step(input_tokens_batch, hidden,
+                                                            features_emb=features if step == 1 else None)
+            # Choose the most probable next token (greedy decoding)
+            predicted_batch = output.argmax(-1)
+            # Feed predicted batch into next step
+            input_tokens_batch = predicted_batch
+            generated_outputs.append(output)
+
+        batch_output = torch.stack(generated_outputs, dim=1)
+
+        generated_captions = vocab.detokenize(batch_output.argmax(-1))
+
+        for i, c in zip(img_names, generated_captions):
+            print(f"for image {i} gen caption: \"{c}\"")
